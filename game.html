@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Heart in Gestures - Гра</title>
+
+    <!-- MediaPipe & TFJS (вірсії перевірені для браузера) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js"></script>
+
+    <style>
+        /* Твій CSS без змін, злегка скорочено для читабельності */
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Segoe UI',Tahoma, Geneva, Verdana, sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+        .container{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:1200px;width:100%;overflow:hidden}
+        .header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:20px;text-align:center}
+        .header h1{font-size:2.2em;margin-bottom:6px}
+        .level-select{padding:30px;text-align:center}
+        .level-buttons{display:grid;gap:14px;max-width:500px;margin:0 auto}
+        .level-btn{padding:14px;font-size:1.1em;border:none;border-radius:10px;cursor:pointer;transition:all .25s;font-weight:700;color:#fff}
+        .level-btn.easy{background:linear-gradient(135deg,#11998e 0%,#38ef7d 100%)}
+        .level-btn.medium{background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%)}
+        .level-btn.hard{background:linear-gradient(135deg,#fa709a 0%,#fee140 100%)}
+        .game-area{display:none;padding:24px}
+        .game-area.active{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        .game-info{display:flex;flex-direction:column;gap:16px}
+        .flower-container{text-align:center;padding:14px;background:linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%);border-radius:12px}
+        .flower{position:relative;width:150px;height:150px;margin:16px auto}
+        .petal{position:absolute;width:40px;height:60px;background:#ff6b9d;border-radius:50%;transform-origin:50% 100%;transition:opacity .35s}
+        .petal.hidden{opacity:.2}
+        .flower-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;background:#ffd93d;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2em;font-weight:700;color:#333}
+        .info-box{padding:14px;border-radius:10px;background:#f8f9fa;border-left:5px solid #667eea}
+        .info-box h3{color:#667eea;margin-bottom:8px;font-size:1em}
+        .info-box .content{font-size:1.3em;color:#333;font-weight:700;letter-spacing:2px}
+        .video-container{background:#000;border-radius:12px;overflow:hidden;position:relative}
+        #videoElement{width:100%;height:auto;display:block}
+        .video-overlay{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.7);color:#fff;padding:8px 10px;border-radius:8px;font-size:.9em}
+        .controls{display:flex;gap:10px;margin-top:12px}
+        .btn{flex:1;padding:12px;border:none;border-radius:10px;font-size:1em;font-weight:700;cursor:pointer;color:#fff;transition:all .2s}
+        .btn-primary{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%)}
+        .btn-secondary{background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%)}
+        .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.8);align-items:center;justify-content:center;z-index:1000}
+        .modal.active{display:flex}
+        .modal-content{background:#fff;padding:28px;border-radius:16px;text-align:center;max-width:520px}
+        .letters-list{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:8px}
+        .letter-badge{padding:6px 10px;background:#667eea;color:#fff;border-radius:6px;font-weight:700}
+        .letter-badge.wrong{background:#f5576c}
+        .loading{text-align:center;padding:12px;color:#667eea;font-size:1em}
+        @media(max-width:768px){.game-area.active{grid-template-columns:1fr}.header h1{font-size:1.6em}}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💚 Heart in Gestures</h1>
+            <p>Навчання української жестової мови</p>
+        </div>
+
+        <div id="levelSelect" class="level-select">
+            <h2>Виберіть рівень складності</h2>
+            <div class="level-buttons">
+                <button class="level-btn easy" id="easyBtn">🌱 Легкий<br><small>Прості слова (3-6 літер)</small></button>
+                <button class="level-btn medium" id="mediumBtn">🌿 Середній<br><small>Середні слова (4-8 літер)</small></button>
+                <button class="level-btn hard" id="hardBtn">🌳 Складний<br><small>Складні слова (5-10 літер)</small></button>
+            </div>
+            <div id="loadingMsg" class="loading" style="display:none;">
+                Завантаження моделі розпізнавання... Зачекайте, будь ласка.
+            </div>
+        </div>
+
+        <div id="gameArea" class="game-area">
+            <div class="game-info">
+                <div class="flower-container">
+                    <h3>Спроб залишилось</h3>
+                    <div class="flower" id="flower"></div>
+                </div>
+
+                <div class="info-box">
+                    <h3>📝 Слово</h3>
+                    <div class="content" id="wordDisplay">_ _ _ _ _</div>
+                </div>
+
+                <div class="info-box">
+                    <h3>✋ Розпізнаний жест</h3>
+                    <div class="content" id="gestureDisplay">-</div>
+                </div>
+
+                <div class="info-box">
+                    <h3>✅ Вгадані літери</h3>
+                    <div class="letters-list" id="guessedLetters"></div>
+                </div>
+
+                <div class="info-box">
+                    <h3>❌ Невгадані літери</h3>
+                    <div class="letters-list" id="wrongLetters"></div>
+                </div>
+            </div>
+
+            <div>
+                <div class="video-container">
+                    <video id="videoElement" autoplay playsinline muted></video>
+                    <div class="video-overlay">
+                        <div id="status">Камера вимкнена</div>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button class="btn btn-primary" id="cameraToggleBtn"><span id="cameraBtn">📷 Увімкнути камеру</span></button>
+                    <button class="btn btn-secondary" id="resetBtn">🔄 Нова гра</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="modal" class="modal">
+            <div class="modal-content" id="modalContent">
+                <h2 id="modalTitle">Вітаємо!</h2>
+                <p id="modalText"></p>
+                <div style="margin-top:18px;display:flex;gap:8px;justify-content:center">
+                    <button class="btn btn-primary" id="playAgainBtn">Грати знову</button>
+                    <button class="btn btn-secondary" id="backMenuBtn">Головне меню</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function(){
+        // --- Конфіг ---
+        const WORDS = {
+            easy: ["ЛАМПА","МЕТА","СИЛА","ЛИСТ","ТЕПЛО","ПАН","СЕЛО","МАТИ","ТЕМА","СПИНА"],
+            medium: ["МІСТО","ІСПИТ","РОБОТА","МОТИВ","НЕБО","ВИСОТА","СУМА","ПЕРО","ЧОРНИЛА","ТІСТО"],
+            hard: ["УСПІХ","ЖИТТЯ","ГУМОР","ЮРИСТ","ЧЕМПІОН","СИМВОЛ","ІНЖЕНЕР","ЛЮБОВ","ПЕЧИВО","ФІЛОЛОГІЯ"]
+        };
+
+        // (Мапа для майбутньої моделі; поки не використовується)
+        const LETTER_MAP = ['А','Б','В','Г','Е','Ж','И','І','Л','М','Н','О','П','Р','С','Т','У','Ф','Х','Ч','Ш','Ю','Я'];
+
+        // --- Стан гри ---
+        let gameState = {
+            level: null,
+            targetWord: '',
+            guessedLetters: [],
+            wrongLetters: [],
+            attempts: 10,
+            gameWon: false,
+            gameLost: false
+        };
+
+        // --- Камера/MediaPipe ---
+        let cameraActive = false;
+        let hands = null;
+        let camera = null;
+        let model = null; // тут буде tf модель (коли підключиш)
+        let lastRecognizedLetter = '';
+        let stableFrames = 0;
+        const STABLE_FRAMES_NEEDED = 12; // кількість кадрів для стабільності
+
+        // DOM елементи
+        const levelSelectEl = document.getElementById('levelSelect');
+        const gameAreaEl = document.getElementById('gameArea');
+        const loadingMsgEl = document.getElementById('loadingMsg');
+        const gestureDisplayEl = document.getElementById('gestureDisplay');
+        const statusEl = document.getElementById('status');
+        const cameraBtnEl = document.getElementById('cameraBtn');
+        const videoEl = document.getElementById('videoElement');
+
+        // Ініціалізація подій кнопок
+        document.getElementById('easyBtn').addEventListener('click', () => startGame('easy'));
+        document.getElementById('mediumBtn').addEventListener('click', () => startGame('medium'));
+        document.getElementById('hardBtn').addEventListener('click', () => startGame('hard'));
+        document.getElementById('cameraToggleBtn').addEventListener('click', toggleCamera);
+        document.getElementById('resetBtn').addEventListener('click', resetGame);
+        document.getElementById('playAgainBtn').addEventListener('click', () => { resetGame(); });
+        document.getElementById('backMenuBtn').addEventListener('click', backToMenu);
+
+        // Ініціалізація MediaPipe Hands
+        async function initializeHandTracking() {
+            // Якщо вже ініціалізовано — не робимо повторно
+            if (hands) return;
+
+            loadingMsgEl.style.display = 'block';
+
+            try {
+                hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
+                });
+
+                hands.onResults(onHandResults);
+
+                // Мок-завантаження моделі (постав тут завантаження своєї TFJS моделі)
+                await loadModel();
+
+            } catch (err) {
+                console.error('initializeHandTracking error:', err);
+                alert('Не вдалося ініціалізувати розпізнавання рук: ' + err.message);
+            } finally {
+                loadingMsgEl.style.display = 'none';
+            }
+        }
+
+        async function loadModel(){
+            // Placeholder — сюди пізніше підключиш tf.loadLayersModel('path/model.json') і т.д.
+            console.log('TF model placeholder (замініть loadModel на завантаження вашої моделі).');
+            model = { loaded: true };
+        }
+
+        // Обробник результатів від MediaPipe
+        function onHandResults(results) {
+            // Якщо камера не активна — ігноруємо
+            if (!cameraActive) return;
+
+            if (!results || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                // немає рук — очистимо індикатор стабільності / жест
+                gestureDisplayEl.textContent = '-';
+                statusEl.textContent = 'Камера активна — рука не знайдена';
+                lastRecognizedLetter = '';
+                stableFrames = 0;
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+
+            const recognizedLetter = recognizeGesture(landmarks);
+
+            if (recognizedLetter) {
+                if (recognizedLetter === lastRecognizedLetter) {
+                    stableFrames++;
+                    if (stableFrames >= STABLE_FRAMES_NEEDED) {
+                        handleLetterRecognition(recognizedLetter);
+                        stableFrames = 0;
+                        lastRecognizedLetter = ''; // після вгадування чекаємо новий жест
+                    }
+                } else {
+                    lastRecognizedLetter = recognizedLetter;
+                    stableFrames = 0;
+                }
+
+                gestureDisplayEl.textContent = recognizedLetter;
+                statusEl.textContent = `Стабільність: ${Math.floor((stableFrames / STABLE_FRAMES_NEEDED) * 100)}%`;
+            }
+        }
+
+        // Тимчасова (мок) функція розпізнавання — поки замінюється на реальну інференцію
+        function recognizeGesture(landmarks) {
+            // Приклад: повертаємо випадкову літеру з цільового слова (щоб показати роботу гри).
+            // Заміни на нормальну інференцію: нормалізація landmarks -> flatten -> model.predict(...)
+            if (!gameState.targetWord) return null;
+            const letters = gameState.targetWord.split('');
+            return letters[Math.floor(Math.random() * letters.length)];
+        }
+
+        function handleLetterRecognition(letter) {
+            if (gameState.gameWon || gameState.gameLost) return;
+            if (gameState.guessedLetters.includes(letter) || gameState.wrongLetters.includes(letter)) return;
+
+            if (gameState.targetWord.includes(letter)) {
+                gameState.guessedLetters.push(letter);
+                updateDisplay();
+                checkWin();
+            } else {
+                gameState.wrongLetters.push(letter);
+                gameState.attempts--;
+                updateDisplay();
+                checkLose();
+            }
+        }
+
+        function startGame(level) {
+            gameState.level = level;
+            gameState.targetWord = WORDS[level][Math.floor(Math.random() * WORDS[level].length)];
+            gameState.guessedLetters = [];
+            gameState.wrongLetters = [];
+            gameState.attempts = 10;
+            gameState.gameWon = false;
+            gameState.gameLost = false;
+
+            levelSelectEl.style.display = 'none';
+            gameAreaEl.classList.add('active');
+
+            updateDisplay();
+            initializeHandTracking();
+        }
+
+        function resetGame() {
+            closeModal();
+            if (gameState.level) {
+                // Перезапуск тієї ж складності
+                startGame(gameState.level);
+            } else {
+                // якщо рівень не вибрано — повернемося у меню
+                backToMenu();
+            }
+        }
+
+        function backToMenu(){
+            closeModal();
+            stopCamera();
+            gameAreaEl.classList.remove('active');
+            levelSelectEl.style.display = 'block';
+            // скидаємо стан
+            gameState = { level:null, targetWord:'', guessedLetters:[], wrongLetters:[], attempts:10, gameWon:false, gameLost:false };
+            updateDisplay();
+        }
+
+        async function toggleCamera(){
+            if (cameraActive) {
+                stopCamera();
+            } else {
+                await startCamera();
+            }
+        }
+
+        async function startCamera(){
+            try {
+                await initializeHandTracking(); // переконаємось, що hands ініціалізовано
+
+                camera = new Camera(videoEl, {
+                    onFrame: async () => {
+                        try {
+                            if (hands) await hands.send({image: videoEl});
+                        } catch(err) {
+                            console.warn('hands.send error:', err);
+                        }
+                    },
+                    width: 640,
+                    height: 480
+                });
+
+                await camera.start();
+                cameraActive = true;
+                cameraBtnEl.textContent = '⏸️ Вимкнути камеру';
+                statusEl.textContent = 'Камера активна';
+            } catch (err) {
+                console.error('Camera error:', err);
+                alert('Не вдалося увімкнути камеру. Перевірте дозвіл або камеру.\n' + (err.message || err));
+            }
+        }
+
+        function stopCamera(){
+            try {
+                if (camera && typeof camera.stop === 'function') {
+                    camera.stop();
+                }
+            } catch (err) {
+                console.warn('stopCamera error:', err);
+            } finally {
+                camera = null;
+                cameraActive = false;
+                cameraBtnEl.textContent = '📷 Увімкнути камеру';
+                statusEl.textContent = 'Камера вимкнена';
+                // очистимо індикатори
+                gestureDisplayEl.textContent = '-';
+                stableFrames = 0;
+                lastRecognizedLetter = '';
+            }
+        }
+
+        function updateDisplay(){
+            // Слово
+            const displayWord = gameState.targetWord
+                .split('')
+                .map(letter => gameState.guessedLetters.includes(letter) ? letter : '_')
+                .join(' ');
+            document.getElementById('wordDisplay').textContent = displayWord || '_ _ _ _ _';
+
+            // Квітка
+            updateFlower();
+
+            // Вгадані літери
+            const guessedContainer = document.getElementById('guessedLetters');
+            guessedContainer.innerHTML = '';
+            gameState.guessedLetters.forEach(letter => {
+                const badge = document.createElement('div');
+                badge.className = 'letter-badge';
+                badge.textContent = letter;
+                guessedContainer.appendChild(badge);
+            });
+
+            // Невгадані
+            const wrongContainer = document.getElementById('wrongLetters');
+            wrongContainer.innerHTML = '';
+            gameState.wrongLetters.forEach(letter => {
+                const badge = document.createElement('div');
+                badge.className = 'letter-badge wrong';
+                badge.textContent = letter;
+                wrongContainer.appendChild(badge);
+            });
+        }
+
+        function updateFlower(){
+            const flowerContainer = document.getElementById('flower');
+            flowerContainer.innerHTML = '';
+            const totalPetals = 10;
+            for (let i = 0; i < totalPetals; i++){
+                const petal = document.createElement('div');
+                petal.className = 'petal';
+                if (i >= gameState.attempts) petal.classList.add('hidden');
+                const angle = (i * 360) / totalPetals;
+                petal.style.transform = `rotate(${angle}deg) translateY(-45px)`;
+                flowerContainer.appendChild(petal);
+            }
+            const center = document.createElement('div');
+            center.className = 'flower-center';
+            center.textContent = gameState.attempts;
+            flowerContainer.appendChild(center);
+        }
+
+        function checkWin(){
+            if (!gameState.targetWord) return;
+            const allLettersGuessed = gameState.targetWord.split('').every(l => gameState.guessedLetters.includes(l));
+            if (allLettersGuessed){
+                gameState.gameWon = true;
+                showModal('win', 'Вітаємо! 🎉', `Ви вгадали слово: ${gameState.targetWord}`);
+            }
+        }
+
+        function checkLose(){
+            if (gameState.attempts <= 0){
+                gameState.gameLost = true;
+                showModal('lose', 'Гра завершена 😢', `Слово було: ${gameState.targetWord}`);
+            }
+        }
+
+        function showModal(type, title, text){
+            const modal = document.getElementById('modal');
+            const content = document.getElementById('modalContent');
+            content.className = 'modal-content ' + (type || '');
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalText').textContent = text;
+            modal.classList.add('active');
+        }
+
+        function closeModal(){
+            document.getElementById('modal').classList.remove('active');
+        }
+
+        // Зробимо деякі функції глобальними (щоб onclick з HTML працював, як раніше,
+        // хоча ми підключили слухачі подій вище)
+        window.startGame = startGame;
+        window.resetGame = resetGame;
+        window.backToMenu = backToMenu;
+        window.toggleCamera = toggleCamera;
+
+        // Початкове оновлення інтерфейсу
+        updateDisplay();
+    })();
+    </script>
+    <!-- Add before closing </body> tag -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.8/dist/tf-tflite.min.js"></script>
+</body>
+</html>
