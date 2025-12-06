@@ -206,10 +206,11 @@
             }
         }
 
-        async function loadModel(){
-            // Placeholder — сюди пізніше підключиш tf.loadLayersModel('path/model.json') і т.д.
-            console.log('TF model placeholder (замініть loadModel на завантаження вашої моделі).');
-            model = { loaded: true };
+        async function loadModel() {
+            const tflite = await tflit.loadTFLiteModel(
+            'https://raw.githubusercontent.com/AnnaSlysh/GamePart/main/model/keypoint_classifier/keypoint_classifier.tflite'
+            );
+            model = tflite;
         }
 
         // Обробник результатів від MediaPipe
